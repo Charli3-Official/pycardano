@@ -125,9 +125,9 @@ requests = "*"
 
 [package.source]
 type = "git"
-url = "https://github.com/blockfrost/blockfrost-python.git"
-reference = "0.6.0"
-resolved_reference = "baaeb8252a3ec5f0fde07cdfbcbaa3abbca6e459"
+url = "https://github.com/Charli3-Official/blockfrost-python.git"
+reference = "local"
+resolved_reference = "aa58fa673f520eaced49c8a806d16eb99025c4ab"
 
 [[package]]
 name = "cbor2"
@@ -1688,4 +1688,4 @@ testing = ["big-O", "flake8 (<5)", "jaraco.functools", "jaraco.itertools", "more
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.7"
-content-hash = "81f0e8edf1b1f2e86709d46476c3b19df1cec2bf3125837ddb71f7d0c738707c"
+content-hash = "540b02451056f2fe8637f2c1413da1418bfc9ce164eece1a63888350e5527190"
