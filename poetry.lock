@@ -127,7 +127,7 @@ requests = "*"
 type = "git"
 url = "https://github.com/Charli3-Official/blockfrost-python.git"
 reference = "local"
-resolved_reference = "11a52ded776b3978376a98f92a2b357908ee6617"
+resolved_reference = "885003b87c441e6022120184e1940f3473a916b8"
 
 [[package]]
 name = "cbor2"
