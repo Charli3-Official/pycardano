@@ -68,6 +68,7 @@ class BlockFrostChainContext(ChainContext):
         project_id: str,
         network: Optional[Network] = None,
         base_url: str = ApiUrls.preprod.value,
+        cardano_submit_api: Optional[str] = None
     ):
         if network is not None:
             warnings.warn(
@@ -90,6 +91,7 @@ class BlockFrostChainContext(ChainContext):
         self._epoch = None
         self._genesis_param = None
         self._protocol_param = None
+        self._cardano_submit_api = cardano_submit_api
 
     def _check_epoch_and_update(self):
         if int(time.time()) >= self._epoch_info.end_time:
@@ -257,16 +259,16 @@ class BlockFrostChainContext(ChainContext):
         """
         if isinstance(cbor, str):
             cbor = bytes.fromhex(cbor)
-        with tempfile.NamedTemporaryFile(delete=False) as f:
-            f.write(cbor)
+        # with tempfile.NamedTemporaryFile(delete=False) as f:
+        #     f.write(cbor)
         try:
-            response = self.api.transaction_submit(f.name)
+            response = self.api.transaction_submit_cbor(cbor, self._cardano_submit_api)
         except ApiError as e:
-            os.remove(f.name)
+            # os.remove(f.name)
             raise TransactionFailedException(
                 f"Failed to submit transaction. Error code: {e.status_code}. Error message: {e.message}"
             ) from e
-        os.remove(f.name)
+        # os.remove(f.name)
         return response
 
     def evaluate_tx_cbor(self, cbor: Union[bytes, str]) -> Dict[str, ExecutionUnits]:
