@@ -413,8 +413,10 @@ class TransactionBuilder:
                     )
                 if isinstance(s, PlutusV2Script):
                     cost_models[1] = (
-                        self.context.protocol_param.cost_models.get("PlutusV2")
-                        or PLUTUS_V2_COST_MODEL
+                        # Removed context.protocol_param.cost_models since it
+                        # return wrong values, here we export the values
+                        # from plutus.py
+                        PLUTUS_V2_COST_MODEL
                     )
             return script_data_hash(
                 self.redeemers, list(self.datums.values()), CostModels(cost_models)

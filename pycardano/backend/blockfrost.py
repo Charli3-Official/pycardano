@@ -8,6 +8,9 @@ import cbor2
 from blockfrost import ApiError, ApiUrls, BlockFrostApi
 from blockfrost.utils import Namespace
 
+import websocket
+import json
+
 from pycardano.address import Address
 from pycardano.backend.base import (
     ALONZO_COINS_PER_UTXO_WORD,
@@ -285,17 +288,42 @@ class BlockFrostChainContext(ChainContext):
         """
         if isinstance(cbor, bytes):
             cbor = cbor.hex()
-        with tempfile.NamedTemporaryFile(delete=False, mode="w") as f:
-            f.write(cbor)
-        result = self.api.transaction_evaluate(f.name).result
-        os.remove(f.name)
-        return_val = {}
-        if not hasattr(result, "EvaluationResult"):
+        print(cbor)
+        result = self._charli3_transaction_evaluate_cbor(cbor)
+        processed_results = {}
+        if not result:
             raise TransactionFailedException(result)
         else:
-            for k in vars(result.EvaluationResult):
-                return_val[k] = ExecutionUnits(
-                    getattr(result.EvaluationResult, k).memory,
-                    getattr(result.EvaluationResult, k).steps,
-                )
-            return return_val
+            for item in result:
+                key = f"{item['validator']['purpose']}:{item['validator']['index']}"
+                budget = item["budget"]
+                execution_units = ExecutionUnits(budget["memory"], budget["cpu"])
+                processed_results[key] = execution_units
+            return processed_results
+
+    def _charli3_transaction_evaluate_cbor(self, tx_cbor: Union[bytes, str], **kwargs):
+        # Convert bytes to hex
+        if isinstance(tx_cbor, bytes):
+            data = tx_cbor.hex()
+        else:
+            data = tx_cbor
+
+        ws = websocket.WebSocket()
+        ws.connect("ws://localhost:1337/?EvaluateTransaction")
+        request = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "evaluateTransaction",
+                "params": {"transaction": {"cbor": data}},
+            },
+            separators=(",", ":"),
+        )
+        ws.send(request)
+        response = ws.recv()
+        ws.close()
+        response_data = json.loads(response)
+        if "result" not in response:
+            raise TransactionFailedException(
+                f"Ogmios ran into an error. Reponse: {response}"
+            )
+        return response_data["result"]
