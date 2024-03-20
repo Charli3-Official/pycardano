@@ -71,7 +71,8 @@ class BlockFrostChainContext(ChainContext):
         project_id: str,
         network: Optional[Network] = None,
         base_url: str = ApiUrls.preprod.value,
-        cardano_submit_api: Optional[str] = None
+        cardano_submit_api: Optional[str] = None,
+        ogmios_evaluation_api: Optional[str] = None
     ):
         if network is not None:
             warnings.warn(
@@ -95,6 +96,7 @@ class BlockFrostChainContext(ChainContext):
         self._genesis_param = None
         self._protocol_param = None
         self._cardano_submit_api = cardano_submit_api
+        self._ogmios_evaluation_api = ogmios_evaluation_api
 
     def _check_epoch_and_update(self):
         if int(time.time()) >= self._epoch_info.end_time:
@@ -309,7 +311,7 @@ class BlockFrostChainContext(ChainContext):
             data = tx_cbor
 
         ws = websocket.WebSocket()
-        ws.connect("ws://localhost:1337/?EvaluateTransaction")
+        ws.connect(f"{self._ogmios_evaluation_api}/?EvaluateTransaction")
         request = json.dumps(
             {
                 "jsonrpc": "2.0",
