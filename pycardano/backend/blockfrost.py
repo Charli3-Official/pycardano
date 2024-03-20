@@ -290,7 +290,6 @@ class BlockFrostChainContext(ChainContext):
         """
         if isinstance(cbor, bytes):
             cbor = cbor.hex()
-        print(cbor)
         result = self._charli3_transaction_evaluate_cbor(cbor)
         processed_results = {}
         if not result:
