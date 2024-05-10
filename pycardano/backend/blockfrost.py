@@ -9,6 +9,9 @@ import cbor2
 from blockfrost import ApiError, ApiUrls, BlockFrostApi
 from blockfrost.utils import Namespace
 
+import websocket
+import json
+
 from pycardano.address import Address
 from pycardano.backend.base import (
     ALONZO_COINS_PER_UTXO_WORD,
@@ -69,6 +72,8 @@ class BlockFrostChainContext(ChainContext):
         project_id: str,
         network: Optional[Network] = None,
         base_url: Optional[str] = None,
+        cardano_submit_api: Optional[str] = None,
+        ogmios_evaluation_api: Optional[str] = None,
     ):
         if network is not None:
             warnings.warn(
@@ -91,6 +96,8 @@ class BlockFrostChainContext(ChainContext):
         self._epoch = None
         self._genesis_param = None
         self._protocol_param = None
+        self._cardano_submit_api = cardano_submit_api
+        self._ogmios_evaluation_api = ogmios_evaluation_api
 
     def _check_epoch_and_update(self):
         if int(time.time()) >= self._epoch_info.end_time:
@@ -258,16 +265,16 @@ class BlockFrostChainContext(ChainContext):
         """
         if isinstance(cbor, str):
             cbor = bytes.fromhex(cbor)
-        with tempfile.NamedTemporaryFile(delete=False) as f:
-            f.write(cbor)
+        # with tempfile.NamedTemporaryFile(delete=False) as f:
+        #     f.write(cbor)
         try:
-            response = self.api.transaction_submit(f.name)
+            response = self.api.transaction_submit_cbor(cbor, self._cardano_submit_api)
         except ApiError as e:
-            os.remove(f.name)
+            # os.remove(f.name)
             raise TransactionFailedException(
                 f"Failed to submit transaction. Error code: {e.status_code}. Error message: {e.message}"
             ) from e
-        os.remove(f.name)
+        # os.remove(f.name)
         return response
 
     def evaluate_tx_cbor(self, cbor: Union[bytes, str]) -> Dict[str, ExecutionUnits]:
@@ -284,17 +291,42 @@ class BlockFrostChainContext(ChainContext):
         """
         if isinstance(cbor, bytes):
             cbor = cbor.hex()
-        with tempfile.NamedTemporaryFile(delete=False, mode="w") as f:
-            f.write(cbor)
-        result = self.api.transaction_evaluate(f.name).result
-        os.remove(f.name)
-        return_val = {}
-        if not hasattr(result, "EvaluationResult"):
+        result = self.transaction_evaluate_cbor(cbor)
+        processed_results = {}
+        if not result:
             raise TransactionFailedException(result)
         else:
-            for k in vars(result.EvaluationResult):
-                return_val[k] = ExecutionUnits(
-                    getattr(result.EvaluationResult, k).memory,
-                    getattr(result.EvaluationResult, k).steps,
-                )
-            return return_val
+            for item in result:
+                key = f"{item['validator']['purpose']}:{item['validator']['index']}"
+                budget = item["budget"]
+                execution_units = ExecutionUnits(budget["memory"], budget["cpu"])
+                processed_results[key] = execution_units
+            return processed_results
+
+    def transaction_evaluate_cbor(self, tx_cbor: Union[bytes, str], **kwargs):
+        """This function adds support for the evaluation of CBOR for Cardano nodes > 8.*"""
+        # Convert bytes to hex
+        if isinstance(tx_cbor, bytes):
+            data = tx_cbor.hex()
+        else:
+            data = tx_cbor
+
+        ws = websocket.WebSocket()
+        ws.connect(f"{self._ogmios_evaluation_api}/?EvaluateTransaction")
+        request = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "evaluateTransaction",
+                "params": {"transaction": {"cbor": data}},
+            },
+            separators=(",", ":"),
+        )
+        ws.send(request)
+        response = ws.recv()
+        ws.close()
+        response_data = json.loads(response)
+        if "result" not in response:
+            raise TransactionFailedException(
+                f"Ogmios ran into an error. Reponse: {response}"
+            )
+        return response_data["result"]
