@@ -73,7 +73,7 @@ class BlockFrostChainContext(ChainContext):
         network: Optional[Network] = None,
         base_url: Optional[str] = None,
         cardano_submit_api: Optional[str] = None,
-        ogmios_evaluation_api: Optional[str] = None
+        ogmios_evaluation_api: Optional[str] = None,
     ):
         if network is not None:
             warnings.warn(
@@ -291,7 +291,7 @@ class BlockFrostChainContext(ChainContext):
         """
         if isinstance(cbor, bytes):
             cbor = cbor.hex()
-        result = self._charli3_transaction_evaluate_cbor(cbor)
+        result = self.transaction_evaluate_cbor(cbor)
         processed_results = {}
         if not result:
             raise TransactionFailedException(result)
@@ -303,7 +303,8 @@ class BlockFrostChainContext(ChainContext):
                 processed_results[key] = execution_units
             return processed_results
 
-    def _charli3_transaction_evaluate_cbor(self, tx_cbor: Union[bytes, str], **kwargs):
+    def transaction_evaluate_cbor(self, tx_cbor: Union[bytes, str], **kwargs):
+        """This function adds support for the evaluation of CBOR for Cardano nodes > 8.*"""
         # Convert bytes to hex
         if isinstance(tx_cbor, bytes):
             data = tx_cbor.hex()
