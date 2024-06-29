@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from test.pycardano.util import check_two_way_cbor
 
 import pytest
+from typeguard import TypeCheckError
 
 from pycardano.address import Address
 from pycardano.exception import InvalidDataException, InvalidOperationException
@@ -340,7 +341,7 @@ def test_asset_comparison():
 
     assert not any([a == d, a <= d, d <= a])
 
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeCheckError):
         a <= 1
 
 
@@ -380,7 +381,7 @@ def test_multi_asset_comparison():
     assert not a <= d
     assert not d <= a
 
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeCheckError):
         a <= 1
 
 
@@ -469,3 +470,15 @@ def test_inline_datum_serdes():
     cbor = output.to_cbor_hex()
 
     assert cbor == TransactionOutput.from_cbor(cbor).to_cbor_hex()
+
+
+def test_out_of_bound_asset():
+    a = Asset({AssetName(b"abc"): 1 << 64})
+
+    a.to_cbor_hex()  # okay to have out of bound asset
+
+    tx = TransactionBody(mint=MultiAsset({ScriptHash(b"1" * SCRIPT_HASH_SIZE): a}))
+
+    # Not okay only when minting
+    with pytest.raises(InvalidDataException):
+        tx.to_cbor_hex()
