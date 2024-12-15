@@ -8,7 +8,14 @@ from pycardano.backend.base import ChainContext, GenesisParameters, ProtocolPara
 from pycardano.backend.blockfrost import _try_fix_script
 from pycardano.hash import DatumHash, ScriptHash
 from pycardano.network import Network
-from pycardano.plutus import ExecutionUnits, PlutusScript
+from pycardano.plutus import (
+    ExecutionUnits,
+    PlutusScript,
+    PlutusV1Script,
+    PlutusV2Script,
+    PlutusV3Script,
+)
+from pycardano.nativescript import NativeScript
 from pycardano.serialization import RawCBOR
 from pycardano.transaction import (
     Asset,
@@ -18,6 +25,7 @@ from pycardano.transaction import (
     TransactionOutput,
     UTxO,
     Value,
+    TransactionId,
 )
 
 __all__ = ["KupoChainContextExtension"]
@@ -172,11 +180,16 @@ class KupoChainContextExtension(ChainContext):
                 if script_hash:
                     kupo_script_url = self._kupo_url + "/scripts/" + script_hash
                     script = requests.get(kupo_script_url).json()
-                    ver = int(script["language"].removeprefix("plutus:v"))
-                    if 1 <= ver <= 3:
-                        script = PlutusScript.from_version(
-                            ver, bytes.fromhex(script["script"])
-                        )
+
+                    if script["language"].startswith("plutus:v"):
+                        ver = int(script["language"].removeprefix("plutus:v"))
+                        if 1 <= ver <= 3:
+                            script = PlutusScript.from_version(
+                                ver, bytes.fromhex(script["script"])
+                            )
+                            script = _try_fix_script(script_hash, script)
+                    elif script["language"] == "native":
+                        script = NativeScript.from_cbor(script["script"])
                         script = _try_fix_script(script_hash, script)
                     else:
                         raise ValueError("Unknown plutus script type")
@@ -245,3 +258,20 @@ class KupoChainContextExtension(ChainContext):
             :class:`TransactionFailedException`: When fails to evaluate the transaction.
         """
         return self._wrapped_backend.evaluate_tx_cbor(cbor)
+
+    async def get_metadata_cbor(
+        self, tx_id: TransactionId, slot: int
+    ) -> Optional[RawCBOR]:
+        """Get metadata cbor from Kupo.
+        Args:
+            tx_id (TransactionId): Transaction id for metadata to query.
+            slot (int): Slot number.
+        Returns:
+            Optional[RawCBOR]: Metadata cbor."""
+        url_path = f"/metadata/{slot}?transaction_id={tx_id}"
+        result = await self._get(path=url_path)
+        payload = result.json
+        if not payload or len(payload) == 0 or "raw" not in payload[0]:
+            return None
+
+        return RawCBOR(bytes.fromhex(payload[0]["raw"]))
