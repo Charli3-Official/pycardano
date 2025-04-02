@@ -35,7 +35,7 @@ class NativeScript(ArrayCBORSerializable):
     json_field: ClassVar[str]
 
     @classmethod
-    @limit_primitive_type(list)
+    @limit_primitive_type(list, tuple)
     def from_primitive(
         cls: Type[NativeScript], value: list
     ) -> Union[
@@ -49,15 +49,22 @@ class NativeScript(ArrayCBORSerializable):
         elif script_type == ScriptAny._TYPE:
             return super(NativeScript, ScriptAny).from_primitive(value[1:])
         elif script_type == ScriptNofK._TYPE:
-            sub_scripts, required_threshold = (
-                (value[1:][1:], value[1:][:1])
-                if isinstance(value[1:][1], list)
-                else (value[1:][:1], value[1:][1:])
-            )
-            return ScriptNofK(
-                required_threshold[0],
-                [cls.from_primitive(script) for script in sub_scripts[0]],
-            )
+            # Format: [3, X, [[0, h'...'], [0, h'...'], ...]]
+            # x = threshold
+            # [] = sub_scripts
+            if len(value) >= 3 and isinstance(value[2], (list, tuple)):
+                required_threshold = value[1]
+                sub_scripts = value[2]
+                scripts = []
+
+                # Process each sub script inside the list
+                for script in sub_scripts:
+                    if isinstance(script, (list, tuple)):
+                        scripts.append(cls.from_primitive(script))
+
+                return ScriptNofK(required_threshold, scripts)
+            else:
+                raise DeserializeException(f"Invalid ScriptNofK format: {value}")
         elif script_type == InvalidHereAfter._TYPE:
             return super(NativeScript, InvalidHereAfter).from_primitive(value[1:])
         else:
