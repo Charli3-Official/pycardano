@@ -8,7 +8,14 @@ from pycardano.backend.base import ChainContext, GenesisParameters, ProtocolPara
 from pycardano.backend.blockfrost import _try_fix_script
 from pycardano.hash import DatumHash, ScriptHash
 from pycardano.network import Network
-from pycardano.plutus import ExecutionUnits, PlutusScript
+from pycardano.plutus import (
+    ExecutionUnits,
+    PlutusScript,
+    PlutusV1Script,
+    PlutusV2Script,
+    PlutusV3Script,
+)
+from pycardano.nativescript import NativeScript
 from pycardano.serialization import RawCBOR
 from pycardano.transaction import (
     Asset,
@@ -18,6 +25,7 @@ from pycardano.transaction import (
     TransactionOutput,
     UTxO,
     Value,
+    TransactionId,
 )
 
 __all__ = ["KupoChainContextExtension"]
@@ -156,11 +164,48 @@ class KupoChainContextExtension(ChainContext):
         kupo_utxo_url = self._kupo_url + "/matches/" + address + "?unspent"
         results = requests.get(kupo_utxo_url).json()
 
+        return self._parse_kupo_utxo_matches(results)
+
+    def _utxos_with_asset_kupo(
+        self, asset_policy_id: ScriptHash, asset_name: AssetName
+    ) -> List[UTxO]:
+        """Get all UTxOs associated with an asset with Kupo.
+
+        Args:
+            asset_policy_id (ScriptHash): Policy ID - asset minting script hash.
+            asset_name (AssetName): asset name.
+
+        Returns:
+            List[UTxO]: A list of UTxOs.
+        """
+        if self._kupo_url is None:
+            raise AssertionError(
+                "kupo_url object attribute has not been assigned properly."
+            )
+
+        kupo_utxo_url = (
+            self._kupo_url
+            + f"/matches/{asset_policy_id.payload.hex()}.{asset_name.payload.hex()}?unspent"
+        )
+        results = requests.get(kupo_utxo_url).json()
+
+        return self._parse_kupo_utxo_matches(results)
+
+    def _parse_kupo_utxo_matches(self, results: list[dict]) -> list[UTxO]:
+        """Parse all UTxOs from matched results with Kupo.
+
+        Args:
+            results (list[dict]): JSON response with a list of matched UTxOs.
+
+        Returns:
+            List[UTxO]: A list of UTxOs.
+        """
         utxos = []
 
         for result in results:
             tx_id = result["transaction_id"]
             index = result["output_index"]
+            address = result["address"]
 
             if result["spent_at"] is None:
                 tx_in = TransactionInput.from_primitive([tx_id, index])
@@ -172,11 +217,16 @@ class KupoChainContextExtension(ChainContext):
                 if script_hash:
                     kupo_script_url = self._kupo_url + "/scripts/" + script_hash
                     script = requests.get(kupo_script_url).json()
-                    ver = int(script["language"].removeprefix("plutus:v"))
-                    if 1 <= ver <= 3:
-                        script = PlutusScript.from_version(
-                            ver, bytes.fromhex(script["script"])
-                        )
+
+                    if script["language"].startswith("plutus:v"):
+                        ver = int(script["language"].removeprefix("plutus:v"))
+                        if 1 <= ver <= 3:
+                            script = PlutusScript.from_version(
+                                ver, bytes.fromhex(script["script"])
+                            )
+                            script = _try_fix_script(script_hash, script)
+                    elif script["language"] == "native":
+                        script = NativeScript.from_cbor(script["script"])
                         script = _try_fix_script(script_hash, script)
                     else:
                         raise ValueError("Unknown plutus script type")
@@ -245,3 +295,20 @@ class KupoChainContextExtension(ChainContext):
             :class:`TransactionFailedException`: When fails to evaluate the transaction.
         """
         return self._wrapped_backend.evaluate_tx_cbor(cbor)
+
+    async def get_metadata_cbor(
+        self, tx_id: TransactionId, slot: int
+    ) -> Optional[RawCBOR]:
+        """Get metadata cbor from Kupo.
+        Args:
+            tx_id (TransactionId): Transaction id for metadata to query.
+            slot (int): Slot number.
+        Returns:
+            Optional[RawCBOR]: Metadata cbor."""
+        url_path = f"/metadata/{slot}?transaction_id={tx_id}"
+        result = await self._get(path=url_path)
+        payload = result.json
+        if not payload or len(payload) == 0 or "raw" not in payload[0]:
+            return None
+
+        return RawCBOR(bytes.fromhex(payload[0]["raw"]))
