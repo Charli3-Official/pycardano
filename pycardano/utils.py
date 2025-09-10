@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import math
-from typing import Dict, List, Optional, Union
+import sys
+from typing import Dict, List, Optional, Tuple, Union
 
 import cbor2
 from nacl.encoding import RawEncoder
@@ -11,8 +12,8 @@ from nacl.hash import blake2b
 
 from pycardano.backend.base import ChainContext
 from pycardano.hash import SCRIPT_DATA_HASH_SIZE, SCRIPT_HASH_SIZE, ScriptDataHash
-from pycardano.plutus import COST_MODELS, CostModels, Datum, Redeemers
-from pycardano.serialization import default_encoder
+from pycardano.plutus import COST_MODELS, CostModels, Datum, RedeemerMap, Redeemers
+from pycardano.serialization import NonEmptyOrderedSet, default_encoder
 from pycardano.transaction import MultiAsset, TransactionOutput, Value
 
 __all__ = [
@@ -24,6 +25,7 @@ __all__ = [
     "min_lovelace_post_alonzo",
     "script_data_hash",
     "tiered_reference_script_fee",
+    "greater_than_version",
 ]
 
 
@@ -78,7 +80,7 @@ def fee(
     """Calculate fee based on the length of a transaction's CBOR bytes and script execution.
 
     Args:
-        context (ChainConext): A chain context.
+        context (ChainContext): A chain context.
         length (int): The length of CBOR bytes, which could usually be derived
             by `len(tx.to_cbor())`.
         exec_steps (int): Number of execution steps run by plutus scripts in the transaction.
@@ -199,7 +201,7 @@ def min_lovelace_pre_alonzo(
 def min_lovelace_post_alonzo(output: TransactionOutput, context: ChainContext) -> int:
     """Calculate minimum lovelace a transaction output needs to hold post alonzo.
 
-    This implementation is copied from the origianl Haskell implementation:
+    This implementation is copied from the original Haskell implementation:
     https://github.com/input-output-hk/cardano-ledger/blob/eb053066c1d3bb51fb05978eeeab88afc0b049b2/eras/babbage/impl/src/Cardano/Ledger/Babbage/Rules/Utxo.hs#L242-L265
 
     Args:
@@ -233,30 +235,35 @@ def min_lovelace_post_alonzo(output: TransactionOutput, context: ChainContext) -
 
 
 def script_data_hash(
-    redeemers: Redeemers,
-    datums: List[Datum],
+    redeemers: Optional[Redeemers] = None,
+    datums: Optional[Union[List[Datum], NonEmptyOrderedSet[Datum]]] = None,
     cost_models: Optional[Union[CostModels, Dict]] = None,
 ) -> ScriptDataHash:
     """Calculate plutus script data hash
 
     Args:
-        redeemers (Redeemers): Redeemers to include.
-        datums (List[Datum]): Datums to include.
+        redeemers (Optional[Redeemers]): Redeemers to include.
+        datums (Optional[Union[List[Datum], NonEmptyOrderedSet[Datum]]]): Datums to include.
         cost_models (Optional[CostModels]): Cost models.
 
     Returns:
         ScriptDataHash: Plutus script data hash
     """
-    if not redeemers:
+    if redeemers is None:
+        redeemers = RedeemerMap()
+        cost_models = {}
+    elif len(redeemers) == 0:
         cost_models = {}
     elif not cost_models:
         cost_models = COST_MODELS
 
     redeemer_bytes = cbor2.dumps(redeemers, default=default_encoder)
+
     if datums:
         datum_bytes = cbor2.dumps(datums, default=default_encoder)
     else:
         datum_bytes = b""
+
     cost_models_bytes = cbor2.dumps(cost_models, default=default_encoder)
 
     return ScriptDataHash(
@@ -266,3 +273,15 @@ def script_data_hash(
             encoder=RawEncoder,
         )
     )
+
+
+def greater_than_version(version: Tuple[int, int]) -> bool:
+    """Check if the current Python version is greater than or equal to the specified version
+
+    Args:
+        version (Tuple[int, int]): Tuple of major and minor version
+
+    Returns:
+        True if the current Python version is greater than or equal to the specified version
+    """
+    return sys.version_info >= version

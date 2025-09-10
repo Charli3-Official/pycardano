@@ -21,6 +21,7 @@ making it a light-weight library that is easy and fast to set up in all kinds of
     :caption: Usage Guides
 
     guides/address
+    guides/governance
     guides/serialization
     guides/instance_creation
     guides/transaction
@@ -38,12 +39,14 @@ making it a light-weight library that is easy and fast to set up in all kinds of
    api/pycardano.crypto
    api/pycardano.coinselection
    api/pycardano.exception
+   api/pycardano.governance
    api/pycardano.hash
    api/pycardano.key
    api/pycardano.metadata
    api/pycardano.nativescript
    api/pycardano.network
    api/pycardano.plutus
+   api/pycardano.poolparams
    api/pycardano.serialization
    api/pycardano.transaction
    api/pycardano.utils

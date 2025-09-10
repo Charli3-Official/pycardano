@@ -5,7 +5,8 @@ set -o pipefail
 
 ROOT=$(pwd)
 
-poetry install
+poetry install -C ..
+make ensure-pure-cbor2 -f ../Makefile
 #poetry run pip install ogmios
 
 ##########
@@ -72,6 +73,9 @@ docker compose -f docker-compose-chang.yml up -d
 
 export PAYMENT_KEY="$ROOT"/configs/local-chang/shelley/utxo-keys/utxo1.skey
 export EXTENDED_PAYMENT_KEY="$ROOT"/keys/extended.skey
+export POOL_COLD_KEY="$ROOT"/keys/pool/cold.skey
+export POOL_PAYMENT_KEY="$ROOT"/keys/pool/payment.skey
+export POOL_STAKE_KEY="$ROOT"/keys/pool/stake.skey
 export POOL_ID=$(cat "$ROOT"/keys/pool/pool.id)
 
 sleep 10
@@ -89,7 +93,7 @@ while true; do
     sleep 2
 done
 
-poetry run pytest -m "not (CardanoCLI)" -s -vv -n 4 "$ROOT"/test  --cov=pycardano --cov-config=../.coveragerc --cov-report=xml:../coverage.xml
+poetry run pytest -m "not (CardanoCLI)" -s -vv "$ROOT"/test  --cov=pycardano --cov-config=../.coveragerc --cov-report=xml:../coverage.xml
 
 # Cleanup
 docker compose -f docker-compose-chang.yml down --volumes --remove-orphans

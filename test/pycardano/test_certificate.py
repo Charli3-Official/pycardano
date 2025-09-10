@@ -1,16 +1,34 @@
 import os
 
-from pycardano import StakeSigningKey, TransactionBody
+import pytest
+
+from pycardano import AnchorDataHash, StakeSigningKey, TransactionBody
 from pycardano.address import Address
 from pycardano.certificate import (
+    Anchor,
+    AuthCommitteeHotCertificate,
+    DRep,
+    DRepCredential,
+    DRepKind,
     PoolRegistration,
     PoolRetirement,
+    ResignCommitteeColdCertificate,
     StakeCredential,
     StakeDelegation,
     StakeDeregistration,
     StakeRegistration,
+    UnregDRepCertificate,
+    UpdateDRepCertificate,
 )
-from pycardano.hash import POOL_KEY_HASH_SIZE, SCRIPT_HASH_SIZE, PoolKeyHash, ScriptHash
+from pycardano.exception import DeserializeException, InvalidArgumentException
+from pycardano.hash import (  # plutus_script_hash,
+    POOL_KEY_HASH_SIZE,
+    SCRIPT_HASH_SIZE,
+    VERIFICATION_KEY_HASH_SIZE,
+    PoolKeyHash,
+    ScriptHash,
+    VerificationKeyHash,
+)
 
 TEST_ADDR = Address.from_primitive(
     "stake_test1upyz3gk6mw5he20apnwfn96cn9rscgvmmsxc9r86dh0k66gswf59n"
@@ -146,6 +164,352 @@ def test_staking_certificate_serdes():
         ]
     )
 
-    after_serdes = TransactionBody.from_cbor(transaction_body.to_cbor())
+    primitives = transaction_body.to_validated_primitive()
+
+    cbor_hex = transaction_body.to_cbor_hex()
+
+    after_serdes = TransactionBody.from_cbor(cbor_hex)
 
     assert after_serdes == transaction_body
+
+
+def test_anchor():
+    url = "https://example.com"
+    data_hash = AnchorDataHash(bytes.fromhex("0" * 64))  # 32 bytes
+    anchor = Anchor(url=url, data_hash=data_hash)
+
+    anchor_cbor_hex = anchor.to_cbor_hex()
+
+    assert (
+        anchor_cbor_hex
+        == "827368747470733a2f2f6578616d706c652e636f6d58200000000000000000000000000000000000000000000000000000000000000000"
+    )
+
+    assert Anchor.from_cbor(anchor_cbor_hex) == anchor
+
+
+def test_drep_credential():
+    staking_key = StakeSigningKey.from_cbor(
+        "5820ff3a330df8859e4e5f42a97fcaee73f6a00d0cf864f4bca902bd106d423f02c0"
+    )
+    drep_credential = DRepCredential(staking_key.to_verification_key().hash())
+    drep_credential_cbor_hex = drep_credential.to_cbor_hex()
+    assert (
+        drep_credential_cbor_hex
+        == "8200581c4828a2dadba97ca9fd0cdc99975899470c219bdc0d828cfa6ddf6d69"
+    )
+    assert DRepCredential.from_cbor(drep_credential_cbor_hex) == drep_credential
+
+
+@pytest.mark.parametrize(
+    "input_values,expected_kind,expected_credential,expected_exception,case_id",
+    [
+        # Happy path: VERIFICATION_KEY_HASH
+        (
+            [DRepKind.VERIFICATION_KEY_HASH.value, b"1" * VERIFICATION_KEY_HASH_SIZE],
+            DRepKind.VERIFICATION_KEY_HASH,
+            VerificationKeyHash(b"1" * VERIFICATION_KEY_HASH_SIZE),
+            None,
+            "verification_key_hash",
+        ),
+        # Happy path: SCRIPT_HASH
+        (
+            [DRepKind.SCRIPT_HASH.value, b"1" * SCRIPT_HASH_SIZE],
+            DRepKind.SCRIPT_HASH,
+            ScriptHash(b"1" * SCRIPT_HASH_SIZE),
+            None,
+            "script_hash",
+        ),
+        # Happy path: ALWAYS_ABSTAIN
+        (
+            [DRepKind.ALWAYS_ABSTAIN.value],
+            DRepKind.ALWAYS_ABSTAIN,
+            None,
+            None,
+            "always_abstain",
+        ),
+        # Happy path: ALWAYS_NO_CONFIDENCE
+        (
+            [DRepKind.ALWAYS_NO_CONFIDENCE.value],
+            DRepKind.ALWAYS_NO_CONFIDENCE,
+            None,
+            None,
+            "always_no_confidence",
+        ),
+        # Error: invalid DRepKind value (not in enum)
+        ([99], None, None, DeserializeException, "invalid_drep_kind"),
+        # Error: valid kind but missing credential for VERIFICATION_KEY_HASH
+        (
+            [DRepKind.VERIFICATION_KEY_HASH.value],
+            None,
+            None,
+            IndexError,
+            "missing_credential_verification_key_hash",
+        ),
+        # Error: valid kind but missing credential for SCRIPT_HASH
+        (
+            [DRepKind.SCRIPT_HASH.value],
+            None,
+            None,
+            IndexError,
+            "missing_credential_script_hash",
+        ),
+        # Error: valid kind but extra credential for ALWAYS_ABSTAIN
+        (
+            [DRepKind.ALWAYS_ABSTAIN.value, b"extra"],
+            DRepKind.ALWAYS_ABSTAIN,
+            None,
+            None,
+            "abstain_with_extra",
+        ),
+        # Error: valid kind but extra credential for ALWAYS_NO_CONFIDENCE
+        (
+            [DRepKind.ALWAYS_NO_CONFIDENCE.value, b"extra"],
+            DRepKind.ALWAYS_NO_CONFIDENCE,
+            None,
+            None,
+            "no_confidence_with_extra",
+        ),
+        # Error: input is empty
+        ([], None, None, IndexError, "empty_input"),
+        # Error: input is not a list or tuple
+        ("notalist", None, None, DeserializeException, "input_not_list"),
+    ],
+    ids=lambda p: p if isinstance(p, str) else None,
+)
+def test_drep_from_primitive(
+    input_values, expected_kind, expected_credential, expected_exception, case_id
+):
+
+    # Arrange
+    # (All input values are provided via test parameters)
+
+    # Act / Assert
+    if expected_exception:
+        with pytest.raises(expected_exception):
+            DRep.from_primitive(input_values)
+    else:
+        result = DRep.from_primitive(input_values)
+        # Assert
+        assert result.kind == expected_kind
+        if expected_credential is not None:
+            assert isinstance(result.credential, type(expected_credential))
+            assert result.credential.payload == expected_credential.payload
+        else:
+            assert result.credential is None
+
+
+def test_unreg_drep_certificate():
+    staking_key = StakeSigningKey.from_cbor(
+        "5820ff3a330df8859e4e5f42a97fcaee73f6a00d0cf864f4bca902bd106d423f02c0"
+    )
+    drep_credential = DRepCredential(staking_key.to_verification_key().hash())
+    coin = 1000000
+    unreg_drep_cert = UnregDRepCertificate(drep_credential=drep_credential, coin=coin)
+
+    unreg_drep_cert_cbor_hex = unreg_drep_cert.to_cbor_hex()
+
+    assert (
+        unreg_drep_cert_cbor_hex
+        == "83118200581c4828a2dadba97ca9fd0cdc99975899470c219bdc0d828cfa6ddf6d691a000f4240"
+    )
+
+    assert UnregDRepCertificate.from_cbor(unreg_drep_cert_cbor_hex) == unreg_drep_cert
+
+
+def test_update_drep_certificate_with_anchor():
+    staking_key = StakeSigningKey.from_cbor(
+        "5820ff3a330df8859e4e5f42a97fcaee73f6a00d0cf864f4bca902bd106d423f02c0"
+    )
+    drep_credential = DRepCredential(staking_key.to_verification_key().hash())
+    url = "https://pycardano.com"
+    data_hash = AnchorDataHash(bytes.fromhex("0" * 64))  # 32 bytes
+    anchor = Anchor(url=url, data_hash=data_hash)
+    update_drep_cert = UpdateDRepCertificate(
+        drep_credential=drep_credential, anchor=anchor
+    )
+
+    update_drep_cert_cbor_hex = update_drep_cert.to_cbor_hex()
+
+    assert (
+        update_drep_cert_cbor_hex
+        == "83128200581c4828a2dadba97ca9fd0cdc99975899470c219bdc0d828cfa6ddf6d69827568747470733a2f2f707963617264616e6f2e636f6d58200000000000000000000000000000000000000000000000000000000000000000"
+    )
+
+    assert (
+        UpdateDRepCertificate.from_cbor(update_drep_cert_cbor_hex) == update_drep_cert
+    )
+
+
+def test_update_drep_certificate_without_anchor():
+    staking_key = StakeSigningKey.from_cbor(
+        "5820ff3a330df8859e4e5f42a97fcaee73f6a00d0cf864f4bca902bd106d423f02c0"
+    )
+    drep_credential = DRepCredential(staking_key.to_verification_key().hash())
+    update_drep_cert = UpdateDRepCertificate(
+        drep_credential=drep_credential, anchor=None
+    )
+    update_drep_cert_cbor_hex = update_drep_cert.to_cbor_hex()
+
+    assert (
+        update_drep_cert_cbor_hex
+        == "83128200581c4828a2dadba97ca9fd0cdc99975899470c219bdc0d828cfa6ddf6d69f6"
+    )
+
+    assert (
+        UpdateDRepCertificate.from_cbor(update_drep_cert_cbor_hex) == update_drep_cert
+    )
+
+
+def test_auth_committee_hot_certificate():
+    committee_cold_credential = StakeCredential(TEST_ADDR.staking_part)
+    committee_hot_credential = StakeCredential(ScriptHash(b"1" * SCRIPT_HASH_SIZE))
+    auth_committee_hot_cert = AuthCommitteeHotCertificate(
+        committee_cold_credential=committee_cold_credential,
+        committee_hot_credential=committee_hot_credential,
+    )
+
+    auth_committee_hot_cert_cbor_hex = auth_committee_hot_cert.to_cbor_hex()
+
+    assert (
+        auth_committee_hot_cert_cbor_hex
+        == "830e8200581c4828a2dadba97ca9fd0cdc99975899470c219bdc0d828cfa6ddf6d698201581c31313131313131313131313131313131313131313131313131313131"
+    )
+
+    assert (
+        AuthCommitteeHotCertificate.from_cbor(auth_committee_hot_cert_cbor_hex)
+        == auth_committee_hot_cert
+    )
+
+
+def test_resign_committee_cold_certificate_with_anchor():
+    committee_cold_credential = StakeCredential(TEST_ADDR.staking_part)
+    url = "https://pycardano.com"
+    data_hash = AnchorDataHash(bytes.fromhex("0" * 64))
+    anchor = Anchor(url=url, data_hash=data_hash)
+    resign_committee_cold_cert = ResignCommitteeColdCertificate(
+        committee_cold_credential=committee_cold_credential,
+        anchor=anchor,
+    )
+
+    resign_committee_cold_cert_cbor_hex = resign_committee_cold_cert.to_cbor_hex()
+
+    assert (
+        resign_committee_cold_cert_cbor_hex
+        == "830f8200581c4828a2dadba97ca9fd0cdc99975899470c219bdc0d828cfa6ddf6d69827568747470733a2f2f707963617264616e6f2e636f6d58200000000000000000000000000000000000000000000000000000000000000000"
+    )
+
+    assert (
+        ResignCommitteeColdCertificate.from_cbor(resign_committee_cold_cert_cbor_hex)
+        == resign_committee_cold_cert
+    )
+
+
+def test_resign_committee_cold_certificate_without_anchor():
+    committee_cold_credential = StakeCredential(TEST_ADDR.staking_part)
+    resign_committee_cold_cert = ResignCommitteeColdCertificate(
+        committee_cold_credential=committee_cold_credential,
+        anchor=None,
+    )
+    resign_committee_cold_cert_cbor_hex = resign_committee_cold_cert.to_cbor_hex()
+
+    assert (
+        resign_committee_cold_cert_cbor_hex
+        == "830f8200581c4828a2dadba97ca9fd0cdc99975899470c219bdc0d828cfa6ddf6d69f6"
+    )
+
+    assert (
+        ResignCommitteeColdCertificate.from_cbor(resign_committee_cold_cert_cbor_hex)
+        == resign_committee_cold_cert
+    )
+
+
+def test_invalid_certificate_types():
+    with pytest.raises(DeserializeException) as excinfo:
+        StakeRegistration.from_primitive([1, [0, b"1" * 28]])
+    assert "Invalid StakeRegistration type 1" in str(excinfo.value)
+
+    with pytest.raises(DeserializeException) as excinfo:
+        StakeDeregistration.from_primitive([0, [0, b"1" * 28]])
+    assert "Invalid StakeDeregistration type 0" in str(excinfo.value)
+
+    with pytest.raises(DeserializeException) as excinfo:
+        StakeDelegation.from_primitive([1, [0, b"1" * 28], b"1" * 28])
+    assert "Invalid StakeDelegation type 1" in str(excinfo.value)
+
+    with pytest.raises(DeserializeException) as excinfo:
+        PoolRegistration.from_primitive([4, b"1" * 28])
+    assert "Invalid PoolRegistration type 4" in str(excinfo.value)
+
+    with pytest.raises(DeserializeException) as excinfo:
+        PoolRetirement.from_primitive([3, b"1" * 28, 100])
+    assert "Invalid PoolRetirement type 3" in str(excinfo.value)
+
+    staking_key = StakeSigningKey.generate()
+    committee_cold_credential = StakeCredential(
+        staking_key.to_verification_key().hash()
+    )
+    committee_hot_credential = StakeCredential(ScriptHash(b"1" * SCRIPT_HASH_SIZE))
+
+    with pytest.raises(DeserializeException) as excinfo:
+        AuthCommitteeHotCertificate.from_primitive(
+            [15, committee_cold_credential, committee_hot_credential]
+        )
+    assert "Invalid AuthCommitteeHotCertificate type 15" in str(excinfo.value)
+
+    with pytest.raises(DeserializeException) as excinfo:
+        ResignCommitteeColdCertificate.from_primitive(
+            [14, committee_cold_credential, None]
+        )
+    assert "Invalid ResignCommitteeColdCertificate type 14" in str(excinfo.value)
+
+    staking_key = StakeSigningKey.generate()
+    drep_credential = DRepCredential(staking_key.to_verification_key().hash())
+
+    with pytest.raises(DeserializeException) as excinfo:
+        UnregDRepCertificate.from_primitive([18, drep_credential, 1000000])
+    assert "Invalid UnregDRepCertificate type 18" in str(excinfo.value)
+
+    with pytest.raises(DeserializeException) as excinfo:
+        UpdateDRepCertificate.from_primitive([17, drep_credential, None])
+    assert "Invalid UpdateDRepCertificate type 17" in str(excinfo.value)
+
+
+def test_certificate_in_transaction():
+    staking_key = StakeSigningKey.generate()
+    committee_cold_credential = StakeCredential(
+        staking_key.to_verification_key().hash()
+    )
+    committee_hot_credential = StakeCredential(ScriptHash(b"1" * SCRIPT_HASH_SIZE))
+
+    auth_committee_hot_cert = AuthCommitteeHotCertificate(
+        committee_cold_credential=committee_cold_credential,
+        committee_hot_credential=committee_hot_credential,
+    )
+
+    url = "https://example.com"
+    data_hash = AnchorDataHash(bytes.fromhex("0" * 64))  # 32 bytes
+    anchor = Anchor(url=url, data_hash=data_hash)
+    resign_committee_cold_cert = ResignCommitteeColdCertificate(
+        committee_cold_credential=committee_cold_credential,
+        anchor=anchor,
+    )
+
+    # Create transaction with certificates
+    transaction_body = TransactionBody(
+        certificates=[
+            auth_committee_hot_cert,
+            resign_committee_cold_cert,
+        ]
+    )
+
+    # Test serialization/deserialization
+    after_serdes = TransactionBody.from_cbor(transaction_body.to_cbor())
+    assert after_serdes == transaction_body
+
+    # Verify certificates in deserialized transaction
+    assert len(after_serdes.certificates) == 2
+    assert isinstance(after_serdes.certificates[0], AuthCommitteeHotCertificate)
+    assert isinstance(after_serdes.certificates[1], ResignCommitteeColdCertificate)
+    assert after_serdes.certificates[0] == auth_committee_hot_cert
+    assert after_serdes.certificates[1] == resign_committee_cold_cert

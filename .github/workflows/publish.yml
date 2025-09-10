@@ -9,7 +9,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: [3.9]
+        python-version: ['3.13']
         os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
@@ -17,13 +17,16 @@ jobs:
       - name: Install poetry
         run: pipx install poetry
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v3
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'poetry'
       - name: Install dependencies
         run: |
           poetry install
+      - name: Ensure pure cbor2 is installed
+        run: |
+          make ensure-pure-cbor2
       - name: Lint with flake8
         run: |
           poetry run flake8 pycardano

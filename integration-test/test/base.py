@@ -34,6 +34,9 @@ class TestBase:
 
     payment_key_path = os.environ.get("PAYMENT_KEY")
     extended_key_path = os.environ.get("EXTENDED_PAYMENT_KEY")
+    pool_cold_key_path = os.environ.get("POOL_COLD_KEY")
+    pool_payment_key_path = os.environ.get("POOL_PAYMENT_KEY")
+    pool_stake_key_path = os.environ.get("POOL_STAKE_KEY")
     if not payment_key_path or not extended_key_path:
         raise Exception(
             "Cannot find payment key. Please specify environment variable PAYMENT_KEY and extended_key_path"
@@ -44,19 +47,31 @@ class TestBase:
     extended_payment_vkey = PaymentExtendedVerificationKey.from_signing_key(
         extended_payment_skey
     )
+    pool_cold_skey = PaymentSigningKey.load(pool_cold_key_path)
+    pool_cold_vkey = PaymentVerificationKey.from_signing_key(pool_cold_skey)
+    pool_payment_skey = PaymentSigningKey.load(pool_payment_key_path)
+    pool_payment_vkey = PaymentVerificationKey.from_signing_key(pool_payment_skey)
+    pool_stake_skey = StakeSigningKey.load(pool_stake_key_path)
+    pool_stake_vkey = StakeVerificationKey.from_signing_key(pool_stake_skey)
 
     payment_key_pair = PaymentKeyPair.generate()
     stake_key_pair = StakeKeyPair.generate()
 
-    @retry(tries=TEST_RETRIES, delay=3)
-    def assert_output(self, target_address, target_output):
+    @retry(tries=10, delay=3)
+    def assert_output(self, target_address, target):
         utxos = self.chain_context.utxos(target_address)
         found = False
 
         for utxo in utxos:
-            output = utxo.output
-            if output == target_output:
-                found = True
+            if isinstance(target, UTxO):
+                if utxo == target:
+                    found = True
+            if isinstance(target, TransactionOutput):
+                if utxo.output == target:
+                    found = True
+            if isinstance(target, TransactionId):
+                if utxo.input.transaction_id == target:
+                    found = True
 
         assert found, f"Cannot find target UTxO in address: {target_address}"
 
@@ -75,4 +90,5 @@ class TestBase:
         print(signed_tx.to_cbor_hex())
         print("############### Submitting transaction ###############")
         self.chain_context.submit_tx(signed_tx)
-        self.assert_output(target_address, target_output=output)
+        target_utxo = UTxO(TransactionInput(signed_tx.id, 0), output)
+        self.assert_output(target_address, target_utxo)
