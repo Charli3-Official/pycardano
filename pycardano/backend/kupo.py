@@ -9,6 +9,7 @@ from pycardano.backend.blockfrost import _try_fix_script
 from pycardano.hash import DatumHash, ScriptHash
 from pycardano.network import Network
 from pycardano.plutus import ExecutionUnits, PlutusScript
+from pycardano.nativescript import NativeScript
 from pycardano.serialization import RawCBOR
 from pycardano.transaction import (
     Asset,
@@ -152,7 +153,6 @@ class KupoChainContextExtension(ChainContext):
             raise AssertionError(
                 "kupo_url object attribute has not been assigned properly."
             )
-
         kupo_utxo_url = self._kupo_url + "/matches/" + address + "?unspent"
         results = requests.get(kupo_utxo_url).json()
 
@@ -172,11 +172,16 @@ class KupoChainContextExtension(ChainContext):
                 if script_hash:
                     kupo_script_url = self._kupo_url + "/scripts/" + script_hash
                     script = requests.get(kupo_script_url).json()
-                    ver = int(script["language"].removeprefix("plutus:v"))
-                    if 1 <= ver <= 3:
-                        script = PlutusScript.from_version(
-                            ver, bytes.fromhex(script["script"])
-                        )
+                    language = script["language"]
+                    if language.startswith("plutus:v"):
+                        ver = int(script["language"].removeprefix("plutus:v"))
+                        if 1 <= ver <= 3:
+                            script = PlutusScript.from_version(
+                                ver, bytes.fromhex(script["script"])
+                            )
+                            script = _try_fix_script(script_hash, script)
+                    elif language == "native":
+                        script = NativeScript.from_cbor(script["script"])
                         script = _try_fix_script(script_hash, script)
                     else:
                         raise ValueError("Unknown plutus script type")
