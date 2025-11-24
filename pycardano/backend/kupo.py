@@ -182,7 +182,6 @@ class KupoChainContextExtension(ChainContext):
                             script = _try_fix_script(script_hash, script)
                     elif language == "native":
                         script = NativeScript.from_cbor(script["script"])
-                        script = _try_fix_script(script_hash, script)
                     else:
                         raise ValueError("Unknown plutus script type")
 

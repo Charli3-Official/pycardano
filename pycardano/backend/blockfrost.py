@@ -36,10 +36,7 @@ from pycardano.types import JsonDict
 __all__ = ["BlockFrostChainContext"]
 
 
-def _try_fix_script(
-    scripth: str,
-    script: ScriptType,
-) -> ScriptType:
+def _try_fix_script(scripth: str, script: PlutusScript) -> PlutusScript:
     if str(script_hash(script)) == scripth:
         return script
     else:
