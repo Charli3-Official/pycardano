@@ -191,6 +191,29 @@ class KupoChainContextExtension(ChainContext):
 
         return self._parse_kupo_utxo_matches(results)
 
+    def _utxo_by_ref_kupo(self, utxo_reference: TransactionInput) -> Optional[UTxO]:
+        """Get a UTxO associated with a reference - transaction id and output index number.
+
+        Args:
+            utxo_reference (TransactionInput): reference - transaction id and output index number.
+
+        Returns:
+            Optional[UTxO]: A UTxO.
+        """
+        if self._kupo_url is None:
+            raise AssertionError(
+                "kupo_url object attribute has not been assigned properly."
+            )
+
+        kupo_utxo_url = (
+            self._kupo_url
+            + f"/matches/{utxo_reference.index}@{utxo_reference.transaction_id.payload.hex()}?unspent"
+        )
+        results = requests.get(kupo_utxo_url).json()
+        utxos = self._parse_kupo_utxo_matches(results)
+
+        return utxos[0] if utxos else None
+
     def _parse_kupo_utxo_matches(self, results: list[dict]) -> list[UTxO]:
         """Parse all UTxOs from matched results with Kupo.
 
