@@ -140,10 +140,10 @@ class KupoChainContextExtension(ChainContext):
 
     def _parse_kupo_utxo_matches(self, results: List[Dict]) -> List[UTxO]:
         """Parse Kupo UTxO match results into UTxO objects.
-        
+
         Args:
             results: List of UTxO results from Kupo API
-            
+
         Returns:
             List[UTxO]: A list of parsed UTxOs.
         """
