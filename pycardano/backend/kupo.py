@@ -147,7 +147,12 @@ class KupoChainContextExtension(ChainContext):
         Returns:
             List[UTxO]: A list of parsed UTxOs.
         """
+
         utxos = []
+        if self._kupo_url is None:
+            raise AssertionError(
+                "kupo_url object attribute has not been assigned properly."
+            )
 
         for result in results:
             tx_id = result["transaction_id"]
@@ -317,10 +322,13 @@ class KupoChainContextExtension(ChainContext):
             slot (int): Slot number.
         Returns:
             Optional[RawCBOR]: Metadata cbor."""
-        url_path = f"/metadata/{slot}?transaction_id={tx_id}"
-        result = await self._get(path=url_path)
-        payload = result.json
-        if not payload or len(payload) == 0 or "raw" not in payload[0]:
+        if self._kupo_url is None:
+            raise AssertionError(
+                "kupo_url object attribute has not been assigned properly."
+            )
+        url_path = f"{self._kupo_url}/metadata/{slot}?transaction_id={tx_id}"
+        result = requests.get(url_path).json()
+        if not result or len(result) == 0 or "raw" not in result[0]:
             return None
 
-        return RawCBOR(bytes.fromhex(payload[0]["raw"]))
+        return RawCBOR(bytes.fromhex(result[0]["raw"]))
