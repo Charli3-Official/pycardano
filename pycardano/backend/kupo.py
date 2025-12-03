@@ -6,7 +6,7 @@ from cachetools import Cache, LRUCache, TTLCache
 from pycardano.address import Address
 from pycardano.backend.base import ChainContext, GenesisParameters, ProtocolParameters
 from pycardano.backend.blockfrost import _try_fix_script
-from pycardano.hash import DatumHash, ScriptHash
+from pycardano.hash import DatumHash, ScriptHash, TransactionId
 from pycardano.network import Network
 from pycardano.plutus import ExecutionUnits, PlutusScript
 from pycardano.nativescript import NativeScript
@@ -138,24 +138,15 @@ class KupoChainContextExtension(ChainContext):
         self._datum_cache[datum_hash] = datum
         return datum
 
-    def _utxos_kupo(self, address: str) -> List[UTxO]:
-        """Get all UTxOs associated with an address with Kupo.
-        Since UTxO querying will be deprecated from Ogmios in next
-        major release: https://ogmios.dev/mini-protocols/local-state-query/.
-
+    def _parse_kupo_utxo_matches(self, results: List[Dict]) -> List[UTxO]:
+        """Parse Kupo UTxO match results into UTxO objects.
+        
         Args:
-            address (str): An address encoded with bech32.
-
+            results: List of UTxO results from Kupo API
+            
         Returns:
-            List[UTxO]: A list of UTxOs.
+            List[UTxO]: A list of parsed UTxOs.
         """
-        if self._kupo_url is None:
-            raise AssertionError(
-                "kupo_url object attribute has not been assigned properly."
-            )
-        kupo_utxo_url = self._kupo_url + "/matches/" + address + "?unspent"
-        results = requests.get(kupo_utxo_url).json()
-
         utxos = []
 
         for result in results:
@@ -166,6 +157,11 @@ class KupoChainContextExtension(ChainContext):
                 tx_in = TransactionInput.from_primitive([tx_id, index])
 
                 lovelace_amount = result["value"]["coins"]
+
+                # Get address from result
+                address = result.get("address")
+                if not address:
+                    continue
 
                 script = None
                 script_hash = result.get("script_hash", None)
@@ -219,10 +215,72 @@ class KupoChainContextExtension(ChainContext):
                         script=script,
                     )
                 utxos.append(UTxO(tx_in, tx_out))
-            else:
-                continue
 
         return utxos
+
+    def _utxos_kupo(self, address: str) -> List[UTxO]:
+        """Get all UTxOs associated with an address with Kupo.
+        Since UTxO querying will be deprecated from Ogmios in next
+        major release: https://ogmios.dev/mini-protocols/local-state-query/.
+
+        Args:
+            address (str): An address encoded with bech32.
+
+        Returns:
+            List[UTxO]: A list of UTxOs.
+        """
+        if self._kupo_url is None:
+            raise AssertionError(
+                "kupo_url object attribute has not been assigned properly."
+            )
+        kupo_utxo_url = self._kupo_url + "/matches/" + address + "?unspent"
+        results = requests.get(kupo_utxo_url).json()
+
+        return self._parse_kupo_utxo_matches(results)
+
+    def _utxos_with_asset_kupo(
+        self, asset_policy_id: ScriptHash, asset_name: AssetName
+    ) -> List[UTxO]:
+        """Get all UTxOs associated with an asset with Kupo.
+
+        Args:
+            asset_policy_id (ScriptHash): Policy ID - asset minting script hash.
+            asset_name (AssetName): asset name.
+
+        Returns:
+            List[UTxO]: A list of UTxOs.
+        """
+        if self._kupo_url is None:
+            raise AssertionError(
+                "kupo_url object attribute has not been assigned properly."
+            )
+        kupo_utxo_url = (
+            self._kupo_url
+            + f"/matches/{asset_policy_id.payload.hex()}.{asset_name.payload.hex()}?unspent"
+        )
+        results = requests.get(kupo_utxo_url).json()
+        return self._parse_kupo_utxo_matches(results)
+
+    def _utxo_by_ref_kupo(self, utxo_reference: TransactionInput) -> Optional[UTxO]:
+        """Get a UTxO associated with a reference - transaction id and output index number.
+
+        Args:
+            utxo_reference (TransactionInput): reference - transaction id and output index number.
+
+        Returns:
+            Optional[UTxO]: A UTxO.
+        """
+        if self._kupo_url is None:
+            raise AssertionError(
+                "kupo_url object attribute has not been assigned properly."
+            )
+        kupo_utxo_url = (
+            self._kupo_url
+            + f"/matches/{utxo_reference.index}@{utxo_reference.transaction_id.payload.hex()}?unspent"
+        )
+        results = requests.get(kupo_utxo_url).json()
+        utxos = self._parse_kupo_utxo_matches(results)
+        return utxos[0] if utxos else None
 
     def submit_tx_cbor(self, cbor: Union[bytes, str]):
         """Submit a transaction to the blockchain.
@@ -249,3 +307,20 @@ class KupoChainContextExtension(ChainContext):
             :class:`TransactionFailedException`: When fails to evaluate the transaction.
         """
         return self._wrapped_backend.evaluate_tx_cbor(cbor)
+
+    async def get_metadata_cbor(
+        self, tx_id: TransactionId, slot: int
+    ) -> Optional[RawCBOR]:
+        """Get metadata cbor from Kupo.
+        Args:
+            tx_id (TransactionId): Transaction id for metadata to query.
+            slot (int): Slot number.
+        Returns:
+            Optional[RawCBOR]: Metadata cbor."""
+        url_path = f"/metadata/{slot}?transaction_id={tx_id}"
+        result = await self._get(path=url_path)
+        payload = result.json
+        if not payload or len(payload) == 0 or "raw" not in payload[0]:
+            return None
+
+        return RawCBOR(bytes.fromhex(payload[0]["raw"]))
